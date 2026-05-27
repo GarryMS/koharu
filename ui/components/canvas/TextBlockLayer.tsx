@@ -122,8 +122,11 @@ const isAdditiveEvent = (event: unknown): boolean => {
 }
 
 const RESIZE_HANDLE_SIZE = 8
+const ROTATE_HANDLE_DISTANCE = 26
+const ROTATE_HANDLE_SIZE = 12
 
 type ResizeEdge = { top: boolean; bottom: boolean; left: boolean; right: boolean }
+type Point = { x: number; y: number }
 
 function TextBlockItem({
   node,
@@ -136,13 +139,16 @@ function TextBlockItem({
 }: TextBlockItemProps) {
   const boxRef = useRef<HTMLDivElement>(null)
   const dragStart = useRef({ x: 0, y: 0, w: 0, h: 0 })
+  const rotateCenter = useRef<Point | null>(null)
   const edgeRef = useRef<ResizeEdge | null>(null)
   const isResizeRef = useRef(false)
 
-  const setBox = (x: number, y: number, w: number, h: number) => {
+  const setBox = (x: number, y: number, w: number, h: number, rotationDeg: number) => {
     const el = boxRef.current
     if (!el) return
-    el.style.transform = `translate(${x}px, ${y}px)`
+    el.style.left = `${x}px`
+    el.style.top = `${y}px`
+    el.style.transform = `rotate(${rotationDeg}deg)`
     el.style.width = `${w}px`
     el.style.height = `${h}px`
   }
@@ -190,7 +196,7 @@ function TextBlockItem({
         h = Math.max(4 * scale, h)
         if (edge.left && w === 4 * scale) dx = sw - 4 * scale
         if (edge.top && h === 4 * scale) dy = sh - 4 * scale
-        setBox(sx + dx, sy + dy, w, h)
+        setBox(sx + dx, sy + dy, w, h, t.rotationDeg ?? 0)
         if (last) {
           isResizeRef.current = false
           edgeRef.current = null
@@ -203,7 +209,7 @@ function TextBlockItem({
           })
         }
       } else {
-        setBox(sx + mx, sy + my, sw, sh)
+        setBox(sx + mx, sy + my, sw, sh, t.rotationDeg ?? 0)
         if (last) {
           onCommit({
             x: Math.round((sx + mx) / scale),
@@ -218,6 +224,43 @@ function TextBlockItem({
     {
       pointer: { buttons: 1, touch: true },
       filterTaps: true,
+      preventDefault: true,
+      eventOptions: { passive: false },
+    },
+  )
+
+  const rotateBind = useDrag(
+    ({ first, last, event }) => {
+      if (!interactive || !selected) return
+      event?.stopPropagation()
+      if (event?.cancelable) event.preventDefault()
+      if (first) {
+        onSelect(node.id, false)
+        rotateCenter.current = getElementCenter(boxRef.current)
+      }
+
+      const center = rotateCenter.current
+      const pointer = getPointer(event)
+      if (!center || !pointer) return
+
+      const raw = angleFromCenter(center, pointer)
+      const snapped = isShiftEvent(event) ? Math.round(raw / 15) * 15 : raw
+      const nextRotation = normalizeRotation(Math.round(snapped * 10) / 10)
+      setBox(t.x * scale, t.y * scale, t.width * scale, t.height * scale, nextRotation)
+
+      if (last) {
+        rotateCenter.current = null
+        onCommit({
+          x: t.x,
+          y: t.y,
+          width: t.width,
+          height: t.height,
+          rotationDeg: nextRotation,
+        })
+      }
+    },
+    {
+      pointer: { buttons: 1, touch: true },
       preventDefault: true,
       eventOptions: { passive: false },
     },
@@ -238,9 +281,10 @@ function TextBlockItem({
       {...bind()}
       style={{
         position: 'absolute',
-        top: 0,
-        left: 0,
-        transform: `translate(${t.x * scale}px, ${t.y * scale}px)`,
+        top: t.y * scale,
+        left: t.x * scale,
+        transform: `rotate(${t.rotationDeg ?? 0}deg)`,
+        transformOrigin: 'center',
         width: w,
         height: h,
         pointerEvents: interactive ? 'auto' : 'none',
@@ -263,7 +307,12 @@ function TextBlockItem({
       >
         {index + 1}
       </div>
-      {selected && interactive && <ResizeHandles onEdgePointerDown={handleEdgePointerDown} />}
+      {selected && interactive && (
+        <>
+          <ResizeHandles onEdgePointerDown={handleEdgePointerDown} />
+          <RotateHandle bind={rotateBind} />
+        </>
+      )}
     </div>
   )
 }
@@ -275,6 +324,8 @@ function BlockSprite({ node, scale }: { node: TextNodeEntry; scale: number }) {
   const spriteT = node.data.spriteTransform
   const x = (spriteT?.x ?? node.transform.x) * scale
   const y = (spriteT?.y ?? node.transform.y) * scale
+  const w = (spriteT?.width ?? node.transform.width) * scale
+  const h = (spriteT?.height ?? node.transform.height) * scale
   return (
     <img
       alt=''
@@ -282,10 +333,14 @@ function BlockSprite({ node, scale }: { node: TextNodeEntry; scale: number }) {
       draggable={false}
       className='pointer-events-none absolute select-none'
       style={{
-        top: 0,
-        left: 0,
-        transformOrigin: 'top left',
-        transform: `translate(${x}px, ${y}px) scale(${scale})`,
+        top: y,
+        left: x,
+        width: spriteT ? w : undefined,
+        height: spriteT ? h : undefined,
+        transformOrigin: 'center',
+        transform: `rotate(${spriteT?.rotationDeg ?? node.transform.rotationDeg ?? 0}deg)${
+          spriteT ? '' : ` scale(${scale})`
+        }`,
       }}
     />
   )
@@ -349,4 +404,65 @@ function ResizeHandles({ onEdgePointerDown }: { onEdgePointerDown: (edge: Resize
       ))}
     </>
   )
+}
+
+function RotateHandle({ bind }: { bind: ReturnType<typeof useDrag> }) {
+  const s = ROTATE_HANDLE_SIZE
+  const half = s / 2
+
+  return (
+    <>
+      <div
+        aria-hidden
+        className='pointer-events-none absolute left-1/2 w-px -translate-x-1/2 bg-primary'
+        style={{ top: '100%', height: ROTATE_HANDLE_DISTANCE }}
+      />
+      <div
+        {...bind()}
+        role='button'
+        aria-label='Rotate text block'
+        className='absolute left-1/2 z-40 rounded-full border-2 border-primary bg-background shadow-sm'
+        style={{
+          top: `calc(100% + ${ROTATE_HANDLE_DISTANCE}px)`,
+          width: s,
+          height: s,
+          marginLeft: -half,
+          marginTop: -half,
+          cursor: 'grab',
+          touchAction: 'none',
+        }}
+      />
+    </>
+  )
+}
+
+function getElementCenter(el: HTMLElement | null): Point | null {
+  if (!el) return null
+  const rect = el.getBoundingClientRect()
+  return {
+    x: rect.left + rect.width / 2,
+    y: rect.top + rect.height / 2,
+  }
+}
+
+function getPointer(event: Event | undefined): Point | null {
+  if (!event || !('clientX' in event) || !('clientY' in event)) return null
+  const pointer = event as PointerEvent
+  return { x: pointer.clientX, y: pointer.clientY }
+}
+
+function angleFromCenter(center: Point, pointer: Point): number {
+  const rad = Math.atan2(pointer.y - center.y, pointer.x - center.x)
+  return (rad * 180) / Math.PI - 90
+}
+
+function normalizeRotation(degrees: number): number {
+  let normalized = degrees % 360
+  if (normalized > 180) normalized -= 360
+  if (normalized <= -180) normalized += 360
+  return normalized
+}
+
+function isShiftEvent(event: Event | undefined): boolean {
+  return !!event && 'shiftKey' in event && !!(event as PointerEvent).shiftKey
 }

@@ -15,7 +15,7 @@ const MAX_VISIBLE = 10
 type FontOption = {
   familyName: string
   postScriptName: string
-  source: 'system' | 'google'
+  source: 'system' | 'google' | 'custom'
   category?: string | null
   cached: boolean
 }
@@ -38,7 +38,7 @@ type FontSelectProps = {
 }
 
 export function useGoogleFontPreview(family: string, source: string, isVisible: boolean) {
-  const [state, setState] = useState<FontLoadState>(source === 'system' ? 'ready' : 'idle')
+  const [state, setState] = useState<FontLoadState>(source !== 'google' ? 'ready' : 'idle')
   const stateRef = useRef(state)
   stateRef.current = state
 
@@ -126,9 +126,9 @@ function FontRow({
         ...style,
         fontFamily: effectiveFontFamily,
         fontWeight:
-          loadState === 'ready' && font.source === 'system' ? variantInfo.weight : undefined,
+          loadState === 'ready' && font.source !== 'google' ? variantInfo.weight : undefined,
         fontStyle:
-          loadState === 'ready' && font.source === 'system' ? variantInfo.style : undefined,
+          loadState === 'ready' && font.source !== 'google' ? variantInfo.style : undefined,
       }}
       onClick={onClick}
       onKeyDown={(e) => {
@@ -183,7 +183,7 @@ export function FontSelect({
     if (categoryFilter === 'favs') {
       result = result.filter((f) => props.favoriteFonts?.includes(f.postScriptName))
     } else if (categoryFilter) {
-      result = result.filter((f) => f.source === 'system' || f.category === categoryFilter)
+      result = result.filter((f) => f.source !== 'google' || f.category === categoryFilter)
     }
     if (search) {
       const lower = search.toLowerCase()

@@ -799,7 +799,7 @@ export function RenderControlsPanel() {
       <div className='grid w-full grid-cols-2 gap-1.5'>
         <div className='flex min-w-0 flex-col gap-0.5'>
           <span className='truncate text-[10px] font-medium text-muted-foreground uppercase'>
-            {t('render.lineSpacingMultiplier')}
+            {t('render.lineSpacing')}
           </span>
           <div className='flex min-w-0 items-center rounded-md border border-input bg-background shadow-xs'>
             <Button

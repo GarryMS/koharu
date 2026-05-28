@@ -213,7 +213,7 @@
     "effectBorder": "테두리",
     "strokeColorLabel": "테두리 색상",
     "strokeWidthLabel": "테두리 두께",
-    "lineSpacingMultiplier": "줄 간격",
+    "lineSpacing": "줄 간격",
     "letterSpacing": "글자 간격",
     "fontLabel": "글꼴",
     "fontPlaceholder": "글꼴 선택",

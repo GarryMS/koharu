@@ -200,7 +200,7 @@
     "effectBorder": "縁取り",
     "strokeColorLabel": "縁取りの色",
     "strokeWidthLabel": "縁取りの太さ",
-    "lineSpacingMultiplier": "行間",
+    "lineSpacing": "行間",
     "letterSpacing": "字間",
     "fontWeights": {
       "thin": "極細",

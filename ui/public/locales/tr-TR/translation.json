@@ -191,7 +191,7 @@
     "effectBorder": "Kenarlık",
     "strokeColorLabel": "Kenarlık rengi",
     "strokeWidthLabel": "Kenarlık kalınlığı",
-    "lineSpacingMultiplier": "Satır aralığı",
+    "lineSpacing": "Satır aralığı",
     "letterSpacing": "Harf aralığı",
     "fontLabel": "Yazı tipi",
     "fontPlaceholder": "Yazı tipi seç",

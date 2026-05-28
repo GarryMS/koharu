@@ -5,10 +5,13 @@ import {
   AlignLeftIcon,
   AlignRightIcon,
   BoldIcon,
+  CheckIcon,
   ItalicIcon,
   MinusIcon,
   PlusIcon,
+  SaveIcon,
   SquareIcon,
+  Trash2Icon,
 } from 'lucide-react'
 import { type ComponentType, useMemo, useRef, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -50,6 +53,12 @@ import {
   STYLE_KEYWORDS,
   uniqueFontFaces,
 } from '@/lib/font-utils'
+import {
+  createFontPreset,
+  deleteFontPreset,
+  listFontPresets,
+  type FontPreset,
+} from '@/lib/io/fontPresets'
 import { applyOp, invalidateScene, queueAutoRender } from '@/lib/io/scene'
 import { ops } from '@/lib/ops'
 import { useEditorUiStore } from '@/lib/stores/editorUiStore'
@@ -62,6 +71,7 @@ const DEFAULT_STROKE_WIDTH = 1.6
 const MIN_STROKE_WIDTH = 0.2
 const MAX_STROKE_WIDTH = 24
 const STROKE_WIDTH_STEP = 0.1
+const PRESET_NONE = '__none'
 
 const DEFAULT_FONT_FACES: FontFaceInfo[] = [
   {
@@ -140,6 +150,8 @@ export function RenderControlsPanel() {
   const renderEffect = useEditorUiStore((s) => s.renderEffect)
   const setRenderEffect = useEditorUiStore((s) => s.setRenderEffect)
   const setRenderStroke = useEditorUiStore((s) => s.setRenderStroke)
+  const [fontPresets, setFontPresets] = useState<FontPreset[]>([])
+  const [presetValue, setPresetValue] = useState(PRESET_NONE)
 
   const sortedFonts = useMemo(() => {
     return [...(availableFonts ?? [])].sort((a, b) => a.familyName.localeCompare(b.familyName))
@@ -155,6 +167,21 @@ export function RenderControlsPanel() {
     })
     observer.observe(sectionRef.current)
     return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const presets = await listFontPresets()
+        if (!cancelled) setFontPresets(presets)
+      } catch (err) {
+        console.error('Failed to load font presets:', err)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const firstNode = textNodes[0]
@@ -279,6 +306,11 @@ export function RenderControlsPanel() {
     true,
   )
 
+  const presetById = useMemo(
+    () => new Map(fontPresets.map((preset) => [preset.id, preset])),
+    [fontPresets],
+  )
+
   // ---------------------------------------------------------------------------
   // Mutations
   // ---------------------------------------------------------------------------
@@ -296,6 +328,18 @@ export function RenderControlsPanel() {
     return ops.updateNode(page!.id, n.id, {
       data: { text: { style: nextStyle } } as never,
     })
+  }
+
+  const styleForNode = (node: TextNodeEntry): TextStyle => {
+    const style = node.data.style
+    return {
+      fontFamilies: style?.fontFamilies ?? [],
+      fontSize: style?.fontSize ?? null,
+      color: effectiveColorOf(style, node.data.fontPrediction),
+      effect: style?.effect ?? null,
+      stroke: style?.stroke ?? null,
+      textAlign: style?.textAlign ?? null,
+    }
   }
 
   const applyStyleToNodes = (
@@ -346,6 +390,59 @@ export function RenderControlsPanel() {
     applyStrokeSetting({ ...currentStroke, widthPx: clampStrokeWidth(value) })
   }
 
+  const selectedPreset = presetById.get(presetValue)
+  const canApplyPreset = selectedNodes.length > 0 && !!selectedPreset
+  const canSavePreset = selectedNodes.length === 1 && !!selectedNode
+  const canDeletePreset = !!selectedPreset
+
+  const applySelectedPreset = () => {
+    if (!page || !selectedPreset || selectedNodes.length === 0) return
+    const op =
+      selectedNodes.length === 1
+        ? ops.updateNode(page.id, selectedNodes[0].id, {
+            data: {
+              text: { style: selectedPreset.style },
+            } as never,
+          })
+        : ops.batch(
+            'Apply font preset',
+            selectedNodes.map((node) =>
+              ops.updateNode(page.id, node.id, {
+                data: {
+                  text: { style: selectedPreset.style },
+                } as never,
+              }),
+            ),
+          )
+    void (async () => {
+      await applyOp(op)
+      queueAutoRender(page.id)
+    })()
+  }
+
+  const saveCurrentPreset = () => {
+    if (!page || !selectedNode || !canSavePreset) return
+    const name = window.prompt(t('render.fontPresetNamePrompt'))
+    if (!name?.trim()) return
+    void (async () => {
+      const preset = await createFontPreset({
+        name: name.trim(),
+        style: styleForNode(selectedNode),
+      })
+      setFontPresets((presets) => [...presets, preset].sort((a, b) => a.name.localeCompare(b.name)))
+      setPresetValue(preset.id)
+    })()
+  }
+
+  const deleteSelectedPreset = () => {
+    if (!selectedPreset || !canDeletePreset) return
+    if (!window.confirm(t('render.deleteFontPresetConfirm', { name: selectedPreset.name }))) return
+    void (async () => {
+      await deleteFontPreset(selectedPreset.id)
+      setFontPresets((presets) => presets.filter((preset) => preset.id !== selectedPreset.id))
+      setPresetValue(PRESET_NONE)
+    })()
+  }
   const effectItems: {
     key: 'italic' | 'bold'
     label: string
@@ -387,12 +484,90 @@ export function RenderControlsPanel() {
 
   return (
     <div className='flex w-full min-w-0 flex-col gap-2'>
-      {/* Scope */}
-      <div className='flex items-center justify-end'>
+      {/* Preset + Scope */}
+      <div className='flex min-w-0 items-center justify-between gap-1'>
+        <div className='flex min-w-0 items-center gap-0.5'>
+          <Select value={presetValue} onValueChange={setPresetValue}>
+            <SelectTrigger
+              className='h-6 w-28 min-w-0 px-2 text-[11px]'
+              data-testid='render-font-preset-select'
+            >
+              <SelectValue placeholder={t('render.fontPresetPlaceholder')} />
+            </SelectTrigger>
+            <SelectContent align='start' position='popper'>
+              <SelectItem value={PRESET_NONE} disabled>
+                {t('render.fontPresetPlaceholder')}
+              </SelectItem>
+              {fontPresets.map((preset) => (
+                <SelectItem key={preset.id} value={preset.id}>
+                  {preset.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type='button'
+                variant='outline'
+                size='icon-sm'
+                className='size-6 shrink-0'
+                disabled={!canApplyPreset}
+                aria-label={t('render.applyFontPreset')}
+                onClick={applySelectedPreset}
+              >
+                <CheckIcon className='size-3' />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side='bottom' sideOffset={4}>
+              {t('render.applyFontPreset')}
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type='button'
+                variant='outline'
+                size='icon-sm'
+                className='size-6 shrink-0'
+                disabled={!canSavePreset}
+                aria-label={t('render.saveFontPreset')}
+                onClick={saveCurrentPreset}
+              >
+                <SaveIcon className='size-3' />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side='bottom' sideOffset={4}>
+              {t('render.saveFontPreset')}
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type='button'
+                variant='outline'
+                size='icon-sm'
+                className='size-6 shrink-0'
+                disabled={!canDeletePreset}
+                aria-label={t('render.deleteFontPreset')}
+                onClick={deleteSelectedPreset}
+              >
+                <Trash2Icon className='size-3' />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side='bottom' sideOffset={4}>
+              {t('render.deleteFontPreset')}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+
         <span
           data-testid='render-scope-indicator'
           className={cn(
-            'rounded-full border px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase',
+            'shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase',
             scopeToneClass,
           )}
         >

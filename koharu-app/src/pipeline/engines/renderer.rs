@@ -195,6 +195,8 @@ mod tests {
             effect: None,
             stroke: None,
             text_align: None,
+            line_height: None,
+            letter_spacing: None,
         };
         let preserved = preserve_existing_style(Some(style));
         let Some(Some(preserved)) = preserved else {

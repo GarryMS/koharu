@@ -103,6 +103,8 @@ pub struct TextLayout<'a> {
     font: &'a Font,
     fallback_fonts: &'a [Font],
     font_size: Option<f32>,
+    line_height_multiplier: f32,
+    letter_spacing_em: f32,
     max_width: Option<f32>,
     max_height: Option<f32>,
     alignment: Option<TextAlign>,
@@ -117,6 +119,8 @@ impl<'a> TextLayout<'a> {
             font,
             fallback_fonts: &[],
             font_size,
+            line_height_multiplier: 1.0,
+            letter_spacing_em: 0.0,
             max_width: None,
             max_height: None,
             alignment: None,
@@ -125,6 +129,16 @@ impl<'a> TextLayout<'a> {
 
     pub fn with_font_size(mut self, size: f32) -> Self {
         self.font_size = Some(size);
+        self
+    }
+
+    pub fn with_line_height_multiplier(mut self, multiplier: f32) -> Self {
+        self.line_height_multiplier = multiplier.clamp(0.5, 3.0);
+        self
+    }
+
+    pub fn with_letter_spacing_em(mut self, spacing: f32) -> Self {
+        self.letter_spacing_em = spacing.clamp(-0.2, 1.0);
         self
     }
 
@@ -239,7 +253,9 @@ impl<'a> TextLayout<'a> {
         let metrics = font_ref.metrics(Size::new(font_size), LocationRef::default());
         let ascent = metrics.ascent;
         let descent = -metrics.descent;
-        let line_height = (ascent + descent + metrics.leading).max(font_size);
+        let line_height =
+            (ascent + descent + metrics.leading).max(font_size) * self.line_height_multiplier;
+        let letter_spacing = font_size * self.letter_spacing_em;
 
         let bidi_info = BidiInfo::new(text, None);
 
@@ -284,6 +300,7 @@ impl<'a> TextLayout<'a> {
             let mut runs = Vec::new();
             let mut advance = 0.0f32;
             for mut shaped in shape_script_runs(&shaper, suffix.as_str(), &fonts, &suffix_opts)? {
+                apply_letter_spacing(&mut shaped, letter_spacing, false, suffix_opts.direction);
                 for glyph in &mut shaped.glyphs {
                     glyph.cluster += cluster as u32;
                 }
@@ -332,6 +349,13 @@ impl<'a> TextLayout<'a> {
 
                     let script_runs = shape_script_runs(&shaper, run_text, &fonts, &run_opts)?;
                     for mut shaped in script_runs {
+                        apply_letter_spacing(
+                            &mut shaped,
+                            letter_spacing,
+                            self.writing_mode.is_vertical(),
+                            run_opts.direction,
+                        );
+
                         if self.writing_mode.is_vertical() && self.center_vertical_punctuation {
                             self.center_vertical_fullwidth_punctuation(
                                 font_size,
@@ -845,6 +869,49 @@ fn line_break_badness(line_advance: f32, max_extent: f32) -> f32 {
     }
 }
 
+fn apply_letter_spacing(
+    shaped: &mut ShapedRun<'_>,
+    spacing: f32,
+    vertical: bool,
+    direction: harfrust::Direction,
+) {
+    if spacing == 0.0 || shaped.glyphs.len() < 2 {
+        return;
+    }
+
+    let extra_count = shaped.glyphs.len().saturating_sub(1) as f32;
+    if vertical {
+        let sign = advance_sign(shaped.y_advance, -1.0);
+        let extra = sign * spacing;
+        for glyph in shaped.glyphs.iter_mut().take(extra_count as usize) {
+            glyph.y_advance += extra;
+        }
+        shaped.y_advance += extra * extra_count;
+    } else {
+        let fallback = if direction == harfrust::Direction::RightToLeft {
+            -1.0
+        } else {
+            1.0
+        };
+        let sign = advance_sign(shaped.x_advance, fallback);
+        let extra = sign * spacing;
+        for glyph in shaped.glyphs.iter_mut().take(extra_count as usize) {
+            glyph.x_advance += extra;
+        }
+        shaped.x_advance += extra * extra_count;
+    }
+}
+
+fn advance_sign(advance: f32, fallback: f32) -> f32 {
+    if advance > 0.0 {
+        1.0
+    } else if advance < 0.0 {
+        -1.0
+    } else {
+        fallback
+    }
+}
+
 fn centered_x_offset(x_min: f32, x_max: f32) -> f32 {
     -((x_min + x_max) * 0.5)
 }
@@ -1095,6 +1162,25 @@ mod tests {
             assert_eq!(&text[line.range.clone()], expected);
             assert_eq!(line.glyphs.len(), 1);
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn letter_spacing_increases_horizontal_advance() -> anyhow::Result<()> {
+        let font = any_system_font();
+        let font_size = 20.0;
+        let text = "ABC";
+        let normal = TextLayout::new(&font, Some(font_size))
+            .with_writing_mode(WritingMode::Horizontal)
+            .run(text)?;
+        let spaced = TextLayout::new(&font, Some(font_size))
+            .with_writing_mode(WritingMode::Horizontal)
+            .with_letter_spacing_em(0.2)
+            .run(text)?;
+
+        assert!(normal.lines[0].glyphs.len() > 1);
+        assert!(spaced.lines[0].advance > normal.lines[0].advance);
 
         Ok(())
     }

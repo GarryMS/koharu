@@ -62,6 +62,14 @@ const DEFAULT_STROKE_WIDTH = 1.6
 const MIN_STROKE_WIDTH = 0.2
 const MAX_STROKE_WIDTH = 24
 const STROKE_WIDTH_STEP = 0.1
+const DEFAULT_LINE_HEIGHT = 1.0
+const MIN_LINE_HEIGHT = 0.2
+const MAX_LINE_HEIGHT = 3
+const LINE_HEIGHT_STEP = 0.1
+const DEFAULT_LETTER_SPACING = 0
+const MIN_LETTER_SPACING = -0.2
+const MAX_LETTER_SPACING = 2
+const LETTER_SPACING_STEP = 0.05
 
 const DEFAULT_FONT_FACES: FontFaceInfo[] = [
   {
@@ -75,6 +83,10 @@ const DEFAULT_FONT_FACES: FontFaceInfo[] = [
 const clampByte = (v: number) => Math.max(0, Math.min(255, Math.round(v)))
 const clampStrokeWidth = (v: number) =>
   Number(Math.max(MIN_STROKE_WIDTH, Math.min(MAX_STROKE_WIDTH, v)).toFixed(1))
+const clampLineHeight = (v: number) =>
+  Number(Math.max(MIN_LINE_HEIGHT, Math.min(MAX_LINE_HEIGHT, v)).toFixed(1))
+const clampLetterSpacing = (v: number) =>
+  Number(Math.max(MIN_LETTER_SPACING, Math.min(MAX_LETTER_SPACING, v)).toFixed(2))
 
 const colorToHex = (color: number[]) =>
   `#${color
@@ -292,6 +304,8 @@ export function RenderControlsPanel() {
       effect: updates.effect ?? current?.effect ?? null,
       stroke: updates.stroke ?? current?.stroke ?? null,
       textAlign: updates.textAlign ?? current?.textAlign ?? null,
+      lineHeight: updates.lineHeight ?? current?.lineHeight ?? null,
+      letterSpacing: updates.letterSpacing ?? current?.letterSpacing ?? null,
     }
     return ops.updateNode(page!.id, n.id, {
       data: { text: { style: nextStyle } } as never,
@@ -344,6 +358,20 @@ export function RenderControlsPanel() {
 
   const updateStrokeWidth = (value: number) => {
     applyStrokeSetting({ ...currentStroke, widthPx: clampStrokeWidth(value) })
+  }
+
+  const currentLineHeight = selectedStyle?.lineHeight ?? DEFAULT_LINE_HEIGHT
+  const updateLineHeight = (value: number) => {
+    const next = clampLineHeight(value)
+    if (applyStyleToSelected({ lineHeight: next })) return
+    applyStyleToAll({ lineHeight: next })
+  }
+
+  const currentLetterSpacing = selectedStyle?.letterSpacing ?? DEFAULT_LETTER_SPACING
+  const updateLetterSpacing = (value: number) => {
+    const next = clampLetterSpacing(value)
+    if (applyStyleToSelected({ letterSpacing: next })) return
+    applyStyleToAll({ letterSpacing: next })
   }
 
   const effectItems: {
@@ -672,7 +700,7 @@ export function RenderControlsPanel() {
       </div>
 
       {/* Border / Stroke */}
-      <div className='flex flex-col gap-0.5'>
+      <div className='flex min-w-0 flex-col gap-0.5'>
         <span className='text-[10px] font-medium text-muted-foreground uppercase'>
           {t('render.effectBorder')}
         </span>
@@ -747,9 +775,7 @@ export function RenderControlsPanel() {
               inputMode='decimal'
               className='h-7 min-w-0 flex-1 [appearance:textfield] rounded-none border-0 px-1 text-center text-xs shadow-none focus-visible:ring-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
               data-testid='render-stroke-width'
-              value={
-                Number.isFinite(currentStrokeWidth) ? currentStrokeWidth : DEFAULT_STROKE_WIDTH
-              }
+              value={Number.isFinite(currentStrokeWidth) ? currentStrokeWidth : DEFAULT_STROKE_WIDTH}
               onChange={(event) => {
                 const parsed = Number.parseFloat(event.target.value)
                 if (!Number.isFinite(parsed)) return
@@ -762,6 +788,101 @@ export function RenderControlsPanel() {
               size='icon-sm'
               className='size-7 shrink-0 rounded-l-none border-l'
               onClick={() => updateStrokeWidth(currentStrokeWidth + STROKE_WIDTH_STEP)}
+            >
+              <PlusIcon className='size-3' />
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Spacing */}
+      <div className='grid w-full grid-cols-2 gap-1.5'>
+        <div className='flex min-w-0 flex-col gap-0.5'>
+          <span className='truncate text-[10px] font-medium text-muted-foreground uppercase'>
+            {t('render.lineSpacingMultiplier')}
+          </span>
+          <div className='flex min-w-0 items-center rounded-md border border-input bg-background shadow-xs'>
+            <Button
+              type='button'
+              variant='ghost'
+              size='icon-sm'
+              className='size-7 shrink-0 rounded-r-none border-r'
+              disabled={!hasNodes}
+              onClick={() => updateLineHeight(currentLineHeight - LINE_HEIGHT_STEP)}
+            >
+              <MinusIcon className='size-3' />
+            </Button>
+            <Input
+              type='number'
+              step={String(LINE_HEIGHT_STEP)}
+              min={String(MIN_LINE_HEIGHT)}
+              max={String(MAX_LINE_HEIGHT)}
+              inputMode='decimal'
+              className='h-7 min-w-0 flex-1 [appearance:textfield] rounded-none border-0 px-1 text-center text-xs shadow-none focus-visible:ring-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
+              data-testid='render-line-height'
+              disabled={!hasNodes}
+              value={Number.isFinite(currentLineHeight) ? currentLineHeight : DEFAULT_LINE_HEIGHT}
+              onChange={(event) => {
+                const parsed = Number.parseFloat(event.target.value)
+                if (!Number.isFinite(parsed)) return
+                updateLineHeight(parsed)
+              }}
+            />
+            <Button
+              type='button'
+              variant='ghost'
+              size='icon-sm'
+              className='size-7 shrink-0 rounded-l-none border-l'
+              disabled={!hasNodes}
+              onClick={() => updateLineHeight(currentLineHeight + LINE_HEIGHT_STEP)}
+            >
+              <PlusIcon className='size-3' />
+            </Button>
+          </div>
+        </div>
+
+        <div className='flex min-w-0 flex-col gap-0.5'>
+          <span className='truncate text-[10px] font-medium text-muted-foreground uppercase'>
+            {t('render.letterSpacing')}
+          </span>
+          <div className='flex min-w-0 items-center rounded-md border border-input bg-background shadow-xs'>
+            <Button
+              type='button'
+              variant='ghost'
+              size='icon-sm'
+              className='size-7 shrink-0 rounded-r-none border-r'
+              disabled={!hasNodes}
+              onClick={() => updateLetterSpacing(currentLetterSpacing - LETTER_SPACING_STEP)}
+            >
+              <MinusIcon className='size-3' />
+            </Button>
+            <Input
+              type='number'
+              step={String(LETTER_SPACING_STEP)}
+              min={String(MIN_LETTER_SPACING)}
+              max={String(MAX_LETTER_SPACING)}
+              inputMode='decimal'
+              className='h-7 min-w-0 flex-1 [appearance:textfield] rounded-none border-0 px-1 text-center text-xs shadow-none focus-visible:ring-0 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
+              data-testid='render-letter-spacing'
+              disabled={!hasNodes}
+              value={
+                Number.isFinite(currentLetterSpacing)
+                  ? currentLetterSpacing
+                  : DEFAULT_LETTER_SPACING
+              }
+              onChange={(event) => {
+                const parsed = Number.parseFloat(event.target.value)
+                if (!Number.isFinite(parsed)) return
+                updateLetterSpacing(parsed)
+              }}
+            />
+            <Button
+              type='button'
+              variant='ghost'
+              size='icon-sm'
+              className='size-7 shrink-0 rounded-l-none border-l'
+              disabled={!hasNodes}
+              onClick={() => updateLetterSpacing(currentLetterSpacing + LETTER_SPACING_STEP)}
             >
               <PlusIcon className='size-3' />
             </Button>

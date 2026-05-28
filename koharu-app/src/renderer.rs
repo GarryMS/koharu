@@ -238,6 +238,8 @@ impl Renderer {
             effect: None,
             stroke: None,
             text_align: None,
+            line_height: None,
+            letter_spacing: None,
         });
         if style.font_families.is_empty()
             && let Some(font) = document_font
@@ -264,6 +266,8 @@ impl Renderer {
         let mut layout_builder = TextLayout::new(&font, None)
             .with_fallback_fonts(&self.symbol_fallbacks)
             .with_writing_mode(writing_mode)
+            .with_line_height_multiplier(style.line_height.unwrap_or(1.0))
+            .with_letter_spacing_em(style.letter_spacing.unwrap_or(0.0))
             .with_alignment(align);
         if let Some(target_language) = target_language {
             layout_builder = layout_builder.with_hyphenation_language_tag(target_language);
@@ -1076,6 +1080,8 @@ mod tests {
             effect: None,
             stroke: None,
             text_align: None,
+            line_height: None,
+            letter_spacing: None,
         };
         let prediction = FontPrediction {
             text_color: [12, 34, 56],
@@ -1096,6 +1102,8 @@ mod tests {
             effect: None,
             stroke: None,
             text_align: None,
+            line_height: None,
+            letter_spacing: None,
         };
         let prediction = FontPrediction {
             text_color: [12, 34, 56],

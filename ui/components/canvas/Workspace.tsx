@@ -88,6 +88,13 @@ export function Workspace() {
 
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLDivElement | null>(null)
+  const ctrlPanRef = useRef<{
+    pointerId: number
+    clientX: number
+    clientY: number
+    scrollLeft: number
+    scrollTop: number
+  } | null>(null)
   const { setScale: applyScale } = useCanvasZoom()
   const scaleRatio = scale / 100
 
@@ -250,11 +257,58 @@ export function Workspace() {
     },
   )
 
+  const stopCtrlPanEvent = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.cancelable) event.preventDefault()
+    event.stopPropagation()
+  }
+
   const handleCanvasPointerDownCapture = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.ctrlKey && event.button === 0) {
+      const viewport = viewportRef.current
+      if (!viewport) return
+      ctrlPanRef.current = {
+        pointerId: event.pointerId,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        scrollLeft: viewport.scrollLeft,
+        scrollTop: viewport.scrollTop,
+      }
+      event.currentTarget.setPointerCapture(event.pointerId)
+      stopCtrlPanEvent(event)
+      return
+    }
+
     if (mode !== 'block' && event.target === event.currentTarget) {
       clearSelection()
     }
   }
+
+  const handleCanvasPointerMoveCapture = (event: React.PointerEvent<HTMLDivElement>) => {
+    const pan = ctrlPanRef.current
+    if (!pan || pan.pointerId !== event.pointerId) return
+    const viewport = viewportRef.current
+    if (!viewport) return
+    viewport.scrollLeft = pan.scrollLeft - (event.clientX - pan.clientX)
+    viewport.scrollTop = pan.scrollTop - (event.clientY - pan.clientY)
+    stopCtrlPanEvent(event)
+  }
+
+  const endCtrlPan = (event: React.PointerEvent<HTMLDivElement>) => {
+    const pan = ctrlPanRef.current
+    if (!pan || pan.pointerId !== event.pointerId) return
+    ctrlPanRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    stopCtrlPanEvent(event)
+  }
+
+  const handleCanvasLostPointerCapture = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (ctrlPanRef.current?.pointerId === event.pointerId) {
+      ctrlPanRef.current = null
+    }
+  }
+
   const handleCanvasContextMenu = (event: React.MouseEvent<HTMLDivElement>) => {
     handleContextMenu(event)
   }
@@ -302,6 +356,10 @@ export function Workspace() {
                         touchAction: 'none',
                       }}
                       onPointerDownCapture={handleCanvasPointerDownCapture}
+                      onPointerMoveCapture={handleCanvasPointerMoveCapture}
+                      onPointerUpCapture={endCtrlPan}
+                      onPointerCancelCapture={endCtrlPan}
+                      onLostPointerCapture={handleCanvasLostPointerCapture}
                       onContextMenuCapture={handleCanvasContextMenu}
                       {...blockDraftBindings}
                     >

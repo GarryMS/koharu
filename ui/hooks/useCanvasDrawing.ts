@@ -235,6 +235,10 @@ export function useCanvasDrawing(
     ({ first, last, event, active }) => {
       if (!config.enabled || !dims) return
       const sourceEvent = event as MouseEvent
+      if (sourceEvent.ctrlKey) {
+        if ((last || !active) && drawingRef.current) finalizeStroke()
+        return
+      }
       const point = pointerToDocument(sourceEvent)
       if (!point) {
         if ((last || !active) && drawingRef.current) finalizeStroke()

@@ -65,6 +65,10 @@ export function useBlockDrafting({
     ({ first, last, event, active }) => {
       if (!page || mode !== 'block') return
       const sourceEvent = event as MouseEvent
+      if (sourceEvent.ctrlKey) {
+        if ((last || !active) && draftRef.current) finalize()
+        return
+      }
       const point = pointerToDocument(sourceEvent)
       if (!point) {
         if ((last || !active) && draftRef.current) finalize()

@@ -1033,6 +1033,9 @@ export function RenderControlsPanel() {
                 updateLineHeight(parsed)
               }}
             />
+            <span className='flex h-7 w-5 shrink-0 items-center justify-center text-[10px] font-medium text-muted-foreground'>
+              x
+            </span>
             <Button
               type='button'
               variant='ghost'
@@ -1081,6 +1084,9 @@ export function RenderControlsPanel() {
                 updateLetterSpacing(parsed)
               }}
             />
+            <span className='flex h-7 w-6 shrink-0 items-center justify-center text-[10px] font-medium text-muted-foreground'>
+              em
+            </span>
             <Button
               type='button'
               variant='ghost'

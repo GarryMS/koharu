@@ -121,6 +121,11 @@ const isAdditiveEvent = (event: unknown): boolean => {
   return !!(e.shiftKey || e.metaKey || e.ctrlKey)
 }
 
+const isCtrlEvent = (event: unknown): boolean => {
+  if (!event || typeof event !== 'object') return false
+  return !!(event as { ctrlKey?: boolean }).ctrlKey
+}
+
 const RESIZE_HANDLE_SIZE = 8
 const ROTATE_HANDLE_DISTANCE = 26
 const ROTATE_HANDLE_SIZE = 12
@@ -158,6 +163,13 @@ function TextBlockItem({
   const bind = useDrag(
     ({ first, last, movement: [mx, my], event, tap }) => {
       if (!interactive) return
+      if (isCtrlEvent(event) && !tap) {
+        if (last) {
+          isResizeRef.current = false
+          edgeRef.current = null
+        }
+        return
+      }
       event?.stopPropagation()
       const additive = isAdditiveEvent(event)
       if (tap) {
@@ -232,6 +244,7 @@ function TextBlockItem({
   const rotateBind = useDrag(
     ({ first, last, event }) => {
       if (!interactive || !selected) return
+      if (isCtrlEvent(event)) return
       event?.stopPropagation()
       if (event?.cancelable) event.preventDefault()
       if (first) {

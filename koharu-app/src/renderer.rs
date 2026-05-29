@@ -115,10 +115,10 @@ impl Renderer {
             .lock()
             .map_err(|_| anyhow::anyhow!("failed to lock fontbook"))?;
         let mut fonts = fontbook
-            .all_families_with_custom_flag()
+            .all_families()
             .into_iter()
-            .filter(|(face, _)| !face.post_script_name.is_empty())
-            .map(|(face, custom)| {
+            .filter(|face| !face.post_script_name.is_empty())
+            .map(|face| {
                 let family_name = face
                     .families
                     .first()
@@ -127,11 +127,7 @@ impl Renderer {
                 FontFaceInfo {
                     family_name,
                     post_script_name: face.post_script_name,
-                    source: if custom {
-                        FontSource::Custom
-                    } else {
-                        FontSource::System
-                    },
+                    source: FontSource::System,
                     category: None,
                     cached: true,
                 }
@@ -174,7 +170,7 @@ impl Renderer {
                 .fontbook
                 .lock()
                 .map_err(|_| anyhow::anyhow!("failed to lock fontbook"))?;
-            fontbook.load_custom_from_bytes(bytes)?
+            fontbook.load_faces_from_bytes(bytes)?
         };
 
         Ok(faces
@@ -189,7 +185,7 @@ impl Renderer {
                 FontFaceInfo {
                     family_name,
                     post_script_name: face.post_script_name,
-                    source: FontSource::Custom,
+                    source: FontSource::System,
                     category: None,
                     cached: true,
                 }
@@ -873,7 +869,7 @@ fn load_custom_fonts(fontbook: &mut FontBook, custom_fonts_dir: &Utf8Path) -> Re
         }
         let bytes = std::fs::read(&path)
             .with_context(|| format!("failed to read custom font `{}`", path.display()))?;
-        if let Err(err) = fontbook.load_custom_from_bytes(bytes) {
+        if let Err(err) = fontbook.load_faces_from_bytes(bytes) {
             tracing::warn!(path = %path.display(), "failed to load custom font: {err:#}");
         }
     }

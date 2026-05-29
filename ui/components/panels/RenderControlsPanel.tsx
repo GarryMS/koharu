@@ -563,13 +563,7 @@ export function RenderControlsPanel() {
                       variant={variant}
                       label={
                         isDuplicate
-                          ? `${label} (${
-                              variant.source === 'google'
-                                ? 'Google'
-                                : variant.source === 'custom'
-                                  ? 'Custom'
-                                  : 'System'
-                            })`
+                          ? `${label} (${variant.source === 'google' ? 'Google' : 'System'})`
                           : label
                       }
                     />

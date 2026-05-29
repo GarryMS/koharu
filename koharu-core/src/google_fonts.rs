@@ -31,5 +31,4 @@ pub struct GoogleFontCatalog {
 pub enum FontSource {
     System,
     Google,
-    Custom,
 }

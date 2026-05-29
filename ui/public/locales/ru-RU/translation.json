@@ -201,6 +201,8 @@
     "effectBorder": "Обводка",
     "strokeColorLabel": "Цвет обводки",
     "strokeWidthLabel": "Толщина обводки",
+    "lineSpacing": "Интервал строк",
+    "letterSpacing": "Интервал букв",
     "fontWeights": {
       "thin": "Тонкий",
       "extraLight": "Сверхсветлый",

@@ -201,6 +201,8 @@
     "effectBorder": "Borde",
     "strokeColorLabel": "Color del borde",
     "strokeWidthLabel": "Grosor del borde",
+    "lineSpacing": "Interlineado",
+    "letterSpacing": "Espaciado de letras",
     "fontWeights": {
       "thin": "Fino",
       "extraLight": "Extra ligero",

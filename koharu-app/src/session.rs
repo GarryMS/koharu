@@ -186,8 +186,20 @@ fn load_snapshot(dir: &Utf8Path, creating: bool) -> Result<(Scene, u64)> {
     if scene_path.exists() {
         let bytes = std::fs::read(scene_path.as_std_path())
             .with_context(|| format!("read {}", scene_path))?;
-        let snap: Snapshot =
-            postcard::from_bytes(&bytes).with_context(|| format!("decode {}", scene_path))?;
+        let snap: Snapshot = match postcard::from_bytes(&bytes) {
+            Ok(snap) => snap,
+            Err(current_err) => {
+                let legacy = legacy_snapshot::decode(&bytes)
+                    .with_context(|| format!("decode legacy {}", scene_path))
+                    .with_context(|| format!("decode {}", scene_path))?;
+                tracing::warn!(
+                    path = %scene_path,
+                    error = %current_err,
+                    "decoded scene.bin with legacy text style compatibility path"
+                );
+                legacy
+            }
+        };
         return Ok((snap.scene, snap.epoch));
     }
 
@@ -218,6 +230,377 @@ struct ProjectTomlFile {
     name: String,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+mod legacy_snapshot {
+    use anyhow::{Context, Result};
+    use indexmap::IndexMap;
+    use koharu_core::{
+        BlobRef, FontPrediction, ImageData, MaskData, Node, NodeId, NodeKind, Page, PageId,
+        ProjectMeta, Scene, TextAlign, TextDirection, TextShaderEffect, TextStrokeStyle, TextStyle,
+        Transform,
+    };
+    use serde::{Deserialize, Serialize};
+
+    pub(super) fn decode(bytes: &[u8]) -> Result<super::Snapshot> {
+        match postcard::from_bytes::<Snapshot<LineHeightTextStyle>>(bytes) {
+            Ok(snapshot) => return Ok(snapshot.into_current()),
+            Err(err) => {
+                tracing::debug!(error = %err, "legacy decode without letter spacing failed");
+            }
+        }
+
+        let snapshot = postcard::from_bytes::<Snapshot<NoLineHeightTextStyle>>(bytes)
+            .context("decode legacy text style without line height")?;
+        Ok(snapshot.into_current())
+    }
+
+    trait IntoCurrentTextStyle {
+        fn into_current(self) -> TextStyle;
+    }
+
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    #[serde(
+        rename_all = "camelCase",
+        bound(
+            serialize = "S: Serialize",
+            deserialize = "S: serde::de::DeserializeOwned"
+        )
+    )]
+    struct Snapshot<S> {
+        epoch: u64,
+        scene: LegacyScene<S>,
+    }
+
+    impl<S: IntoCurrentTextStyle> Snapshot<S> {
+        fn into_current(self) -> super::Snapshot {
+            super::Snapshot {
+                epoch: self.epoch,
+                scene: self.scene.into_current(),
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    #[serde(
+        rename_all = "camelCase",
+        bound(
+            serialize = "S: Serialize",
+            deserialize = "S: serde::de::DeserializeOwned"
+        )
+    )]
+    struct LegacyScene<S> {
+        project: ProjectMeta,
+        pages: IndexMap<PageId, LegacyPage<S>>,
+    }
+
+    impl<S: IntoCurrentTextStyle> LegacyScene<S> {
+        fn into_current(self) -> Scene {
+            Scene {
+                project: self.project,
+                pages: self
+                    .pages
+                    .into_iter()
+                    .map(|(id, page)| (id, page.into_current()))
+                    .collect(),
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    #[serde(
+        rename_all = "camelCase",
+        bound(
+            serialize = "S: Serialize",
+            deserialize = "S: serde::de::DeserializeOwned"
+        )
+    )]
+    struct LegacyPage<S> {
+        id: PageId,
+        name: String,
+        width: u32,
+        height: u32,
+        nodes: IndexMap<NodeId, LegacyNode<S>>,
+    }
+
+    impl<S: IntoCurrentTextStyle> LegacyPage<S> {
+        fn into_current(self) -> Page {
+            Page {
+                id: self.id,
+                name: self.name,
+                width: self.width,
+                height: self.height,
+                nodes: self
+                    .nodes
+                    .into_iter()
+                    .map(|(id, node)| (id, node.into_current()))
+                    .collect(),
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    #[serde(
+        rename_all = "camelCase",
+        bound(
+            serialize = "S: Serialize",
+            deserialize = "S: serde::de::DeserializeOwned"
+        )
+    )]
+    struct LegacyNode<S> {
+        id: NodeId,
+        #[serde(default)]
+        transform: Transform,
+        visible: bool,
+        kind: LegacyNodeKind<S>,
+    }
+
+    impl<S: IntoCurrentTextStyle> LegacyNode<S> {
+        fn into_current(self) -> Node {
+            Node {
+                id: self.id,
+                transform: self.transform,
+                visible: self.visible,
+                kind: self.kind.into_current(),
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    #[serde(
+        rename_all = "camelCase",
+        bound(
+            serialize = "S: Serialize",
+            deserialize = "S: serde::de::DeserializeOwned"
+        )
+    )]
+    enum LegacyNodeKind<S> {
+        Image(ImageData),
+        Text(LegacyTextData<S>),
+        Mask(MaskData),
+    }
+
+    impl<S: IntoCurrentTextStyle> LegacyNodeKind<S> {
+        fn into_current(self) -> NodeKind {
+            match self {
+                Self::Image(data) => NodeKind::Image(data),
+                Self::Text(data) => NodeKind::Text(data.into_current()),
+                Self::Mask(data) => NodeKind::Mask(data),
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+    #[serde(
+        rename_all = "camelCase",
+        bound(
+            serialize = "S: Serialize",
+            deserialize = "S: serde::de::DeserializeOwned"
+        )
+    )]
+    struct LegacyTextData<S> {
+        #[serde(default)]
+        confidence: f32,
+        #[serde(default)]
+        source_lang: Option<String>,
+        #[serde(default)]
+        source_direction: Option<TextDirection>,
+        #[serde(default)]
+        rendered_direction: Option<TextDirection>,
+        #[serde(default)]
+        line_polygons: Option<Vec<[[f32; 2]; 4]>>,
+        #[serde(default)]
+        rotation_deg: Option<f32>,
+        #[serde(default)]
+        detected_font_size_px: Option<f32>,
+        #[serde(default)]
+        detector: Option<String>,
+        #[serde(default)]
+        text: Option<String>,
+        #[serde(default)]
+        translation: Option<String>,
+        #[serde(default)]
+        style: Option<S>,
+        #[serde(default)]
+        font_prediction: Option<FontPrediction>,
+        #[serde(default)]
+        sprite: Option<BlobRef>,
+        #[serde(default)]
+        sprite_transform: Option<Transform>,
+        #[serde(default)]
+        lock_layout_box: bool,
+    }
+
+    impl<S: IntoCurrentTextStyle> LegacyTextData<S> {
+        fn into_current(self) -> koharu_core::TextData {
+            koharu_core::TextData {
+                confidence: self.confidence,
+                source_lang: self.source_lang,
+                source_direction: self.source_direction,
+                rendered_direction: self.rendered_direction,
+                line_polygons: self.line_polygons,
+                rotation_deg: self.rotation_deg,
+                detected_font_size_px: self.detected_font_size_px,
+                detector: self.detector,
+                text: self.text,
+                translation: self.translation,
+                style: self.style.map(IntoCurrentTextStyle::into_current),
+                font_prediction: self.font_prediction,
+                sprite: self.sprite,
+                sprite_transform: self.sprite_transform,
+                lock_layout_box: self.lock_layout_box,
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct LineHeightTextStyle {
+        font_families: Vec<String>,
+        font_size: Option<f32>,
+        color: [u8; 4],
+        effect: Option<TextShaderEffect>,
+        stroke: Option<TextStrokeStyle>,
+        #[serde(default)]
+        text_align: Option<TextAlign>,
+        #[serde(default)]
+        line_height: Option<f32>,
+    }
+
+    impl IntoCurrentTextStyle for LineHeightTextStyle {
+        fn into_current(self) -> TextStyle {
+            TextStyle {
+                font_families: self.font_families,
+                font_size: self.font_size,
+                color: self.color,
+                effect: self.effect,
+                stroke: self.stroke,
+                text_align: self.text_align,
+                line_height: self.line_height,
+                letter_spacing: None,
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct NoLineHeightTextStyle {
+        font_families: Vec<String>,
+        font_size: Option<f32>,
+        color: [u8; 4],
+        effect: Option<TextShaderEffect>,
+        stroke: Option<TextStrokeStyle>,
+        #[serde(default)]
+        text_align: Option<TextAlign>,
+    }
+
+    impl IntoCurrentTextStyle for NoLineHeightTextStyle {
+        fn into_current(self) -> TextStyle {
+            TextStyle {
+                font_families: self.font_families,
+                font_size: self.font_size,
+                color: self.color,
+                effect: self.effect,
+                stroke: self.stroke,
+                text_align: self.text_align,
+                line_height: None,
+                letter_spacing: None,
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn encode_test_snapshot_without_line_height(
+        page_id: PageId,
+        node_id: NodeId,
+    ) -> Vec<u8> {
+        encode_test_snapshot(
+            page_id,
+            node_id,
+            NoLineHeightTextStyle {
+                font_families: vec!["Arial".to_string()],
+                font_size: Some(20.0),
+                color: [0, 0, 0, 255],
+                effect: Some(TextShaderEffect {
+                    italic: true,
+                    bold: true,
+                }),
+                stroke: None,
+                text_align: Some(TextAlign::Center),
+            },
+        )
+    }
+
+    #[cfg(test)]
+    pub(super) fn encode_test_snapshot_without_letter_spacing(
+        page_id: PageId,
+        node_id: NodeId,
+    ) -> Vec<u8> {
+        encode_test_snapshot(
+            page_id,
+            node_id,
+            LineHeightTextStyle {
+                font_families: vec!["Arial".to_string()],
+                font_size: Some(20.0),
+                color: [0, 0, 0, 255],
+                effect: Some(TextShaderEffect {
+                    italic: true,
+                    bold: true,
+                }),
+                stroke: None,
+                text_align: Some(TextAlign::Center),
+                line_height: Some(1.2),
+            },
+        )
+    }
+
+    #[cfg(test)]
+    fn encode_test_snapshot<S>(page_id: PageId, node_id: NodeId, style: S) -> Vec<u8>
+    where
+        S: IntoCurrentTextStyle + Serialize,
+    {
+        let mut nodes = IndexMap::new();
+        nodes.insert(
+            node_id,
+            LegacyNode {
+                id: node_id,
+                transform: Transform {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 100.0,
+                    height: 40.0,
+                    rotation_deg: 0.0,
+                },
+                visible: true,
+                kind: LegacyNodeKind::Text(LegacyTextData {
+                    style: Some(style),
+                    font_prediction: Some(FontPrediction::default()),
+                    ..Default::default()
+                }),
+            },
+        );
+
+        let mut pages = IndexMap::new();
+        pages.insert(
+            page_id,
+            LegacyPage {
+                id: page_id,
+                name: "legacy".to_string(),
+                width: 800,
+                height: 600,
+                nodes,
+            },
+        );
+
+        let snapshot = Snapshot {
+            epoch: 7,
+            scene: LegacyScene {
+                project: ProjectMeta::default(),
+                pages,
+            },
+        };
+        postcard::to_allocvec(&snapshot).expect("encode legacy snapshot")
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +680,8 @@ mod tests {
                             }),
                             stroke: None,
                             text_align: None,
+                            line_height: None,
+                            letter_spacing: None,
                         }),
                         ..Default::default()
                     }),
@@ -320,6 +705,52 @@ mod tests {
             .expect("effect");
         assert!(effect.italic);
         assert!(effect.bold);
+    }
+
+    #[test]
+    fn open_decodes_legacy_text_style_without_line_height() {
+        let (_tmp, path) = tmp_dir();
+        std::fs::create_dir_all(path.as_std_path()).unwrap();
+        let page_id = PageId::new();
+        let node_id = NodeId::new();
+        let bytes = legacy_snapshot::encode_test_snapshot_without_line_height(page_id, node_id);
+        std::fs::write(path.join(SCENE_FILE).as_std_path(), bytes).unwrap();
+
+        let session = ProjectSession::open(&path).unwrap();
+        let scene = session.scene.read();
+        let page = scene.pages.get(&page_id).expect("page");
+        let node = page.nodes.get(&node_id).expect("node");
+        let NodeKind::Text(text) = &node.kind else {
+            panic!("expected text node");
+        };
+        let style = text.style.as_ref().expect("style");
+        assert_eq!(style.text_align, Some(koharu_core::TextAlign::Center));
+        assert_eq!(style.line_height, None);
+        assert_eq!(style.letter_spacing, None);
+        assert!(text.font_prediction.is_some());
+    }
+
+    #[test]
+    fn open_decodes_legacy_text_style_without_letter_spacing() {
+        let (_tmp, path) = tmp_dir();
+        std::fs::create_dir_all(path.as_std_path()).unwrap();
+        let page_id = PageId::new();
+        let node_id = NodeId::new();
+        let bytes = legacy_snapshot::encode_test_snapshot_without_letter_spacing(page_id, node_id);
+        std::fs::write(path.join(SCENE_FILE).as_std_path(), bytes).unwrap();
+
+        let session = ProjectSession::open(&path).unwrap();
+        let scene = session.scene.read();
+        let page = scene.pages.get(&page_id).expect("page");
+        let node = page.nodes.get(&node_id).expect("node");
+        let NodeKind::Text(text) = &node.kind else {
+            panic!("expected text node");
+        };
+        let style = text.style.as_ref().expect("style");
+        assert_eq!(style.text_align, Some(koharu_core::TextAlign::Center));
+        assert_eq!(style.line_height, Some(1.2));
+        assert_eq!(style.letter_spacing, None);
+        assert!(text.font_prediction.is_some());
     }
 
     #[test]

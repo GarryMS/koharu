@@ -201,6 +201,8 @@
     "effectBorder": "描邊",
     "strokeColorLabel": "描邊顏色",
     "strokeWidthLabel": "描邊寬度",
+    "lineSpacing": "行距",
+    "letterSpacing": "字距",
     "fontWeights": {
       "thin": "極細",
       "extraLight": "特細",

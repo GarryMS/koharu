@@ -4308,6 +4308,7 @@ dependencies = [
  "dashmap",
  "fs4",
  "image",
+ "indexmap 2.14.0",
  "inventory",
  "koharu-ai",
  "koharu-core",

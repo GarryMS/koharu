@@ -224,6 +224,8 @@
     "effectBorder": "Border",
     "strokeColorLabel": "Stroke color",
     "strokeWidthLabel": "Stroke width",
+    "lineSpacing": "Line spacing",
+    "letterSpacing": "Letter spacing",
     "fontLabel": "Font",
     "fontPlaceholder": "Select font",
     "fontColorLabel": "Font color",

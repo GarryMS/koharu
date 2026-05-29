@@ -13,6 +13,8 @@ export interface TextStyle {
   fontFamilies: string[]
   /** @nullable */
   fontSize?: number | null
+  letterSpacing?: number | null
+  lineHeight?: number | null
   stroke?: null | TextStrokeStyle
   textAlign?: null | TextAlign
 }

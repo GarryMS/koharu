@@ -26,7 +26,7 @@ export function Panels() {
     <div className='flex h-full min-h-0 w-full flex-col border-l bg-muted/50'>
       <Tabs
         defaultValue='layers'
-        className='h-60 shrink-0 gap-0 border-b border-border'
+        className='h-72 shrink-0 gap-0 border-b border-border'
         data-testid='panels-settings-tabs'
       >
         <TabsList className='m-2 mb-0 grid w-[calc(100%-1rem)] grid-cols-2 bg-muted/70'>

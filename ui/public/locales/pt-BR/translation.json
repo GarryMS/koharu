@@ -192,6 +192,8 @@
     "effectBorder": "Contorno",
     "strokeColorLabel": "Cor do contorno",
     "strokeWidthLabel": "Espessura do contorno",
+    "lineSpacing": "Entrelinhas",
+    "letterSpacing": "Espaçamento de letras",
     "fontLabel": "Fonte",
     "fontPlaceholder": "Selecionar fonte",
     "fontColorLabel": "Cor da fonte",

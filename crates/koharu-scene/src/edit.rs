@@ -5,7 +5,7 @@ use smallvec::SmallVec;
 use crate::{
     Asset, AssetInput, AssetRole, BlobId, ComponentOwner, EntityId, EntityOrigin, Error,
     Generation, Group, Origin, Page, PageDraft, Patch, Relation, RelationId, RelationKind,
-    RelationSpec, Result, Snapshot, TextGroup, Visibility,
+    RelationSpec, Result, Snapshot, SourceText, TextGroup, Visibility,
     component::{Component, ComponentKey, ComponentRecord, ValidationContext, decode, encode, key},
     components::Assets,
     patch::{Observation, Operation},
@@ -301,6 +301,42 @@ impl Edit {
             key::<T>()?,
             Some(self.encode_value(&value)?),
         )?;
+        self.validate_entities.insert(entity);
+        Ok(())
+    }
+
+    /// Lets an explicit OCR run claim an empty manual source field.
+    pub fn set_generated_source_text_if_empty(
+        &mut self,
+        entity: EntityId,
+        value: &SourceText,
+    ) -> Result<()> {
+        let owner = ComponentOwner::Entity(entity);
+        let key = key::<SourceText>()?;
+        let existing = self
+            .component(owner, &key)?
+            .map(|record| {
+                let record_exists = |id| self.state.contains_entity(id);
+                let blob_exists = |_id| true;
+                decode::<SourceText>(
+                    record,
+                    &ValidationContext::new(&record_exists, &blob_exists),
+                )
+            })
+            .transpose()?;
+        let empty_user_field = existing.as_ref().is_some_and(|current| {
+            matches!(current.text.origin, Origin::User) && current.text.value.is_empty()
+        });
+        if !empty_user_field {
+            return self.set(entity, value);
+        }
+        let generation = self.generation.clone().ok_or_else(|| {
+            Error::Authorship("OCR source text requires a pipeline generation".to_owned())
+        })?;
+        self.observe_component(owner, key.clone())?;
+        let mut value = value.clone();
+        value.text.origin = Origin::Generated(generation);
+        self.replace_component(owner, key, Some(self.encode_value(&value)?))?;
         self.validate_entities.insert(entity);
         Ok(())
     }

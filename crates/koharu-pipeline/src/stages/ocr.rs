@@ -10,8 +10,8 @@ use koharu_ml::{
     paddle_ocr_vl::PaddleOCRVLTask, paddle_ocr_vl_quantized::PaddleOCRVLQuantized,
 };
 use koharu_scene::{
-    Authored, EntityId, Geometry, LanguageTag, OcrAnalysis, Origin, RecognizedFrom, Region,
-    RegionSpec, SourceText, TextDirection, TextRegion,
+    At, Authored, EntityId, Geometry, LanguageTag, OcrAnalysis, Origin, Presents, RecognizedFrom,
+    Region, RegionSpec, SourceText, TextDirection, TextLayout, TextRegion,
 };
 
 const PRODUCER: &str = "dev.koharu.pipeline.ocr";
@@ -124,18 +124,61 @@ impl Model {
             for relation in input.scene.relations_to_as::<RecognizedFrom>(region) {
                 let content = relation.value().source;
                 let previous = input.scene.component::<SourceText>(content)?;
-                if previous
-                    .as_ref()
-                    .is_some_and(|value| matches!(value.text.origin, Origin::User))
-                {
+                if previous.as_ref().is_some_and(|value| {
+                    matches!(value.text.origin, Origin::User)
+                        && (!input.has_entity_scope() || !value.text.value.is_empty())
+                }) {
                     continue;
                 }
                 targets.push(OcrTarget {
                     content,
-                    region,
+                    region: Some(region),
                     geometry: geometry.clone(),
                     previous,
                     image: crop.clone(),
+                });
+            }
+        }
+
+        if input.has_entity_scope() {
+            for entity in input.scene.descendants(page)? {
+                let layer = entity.id();
+                if !input.contains_entity(layer)?
+                    || input.scene.component::<TextLayout>(layer)?.is_none()
+                    || input.scene.component::<Geometry>(layer)?.is_none()
+                {
+                    continue;
+                }
+                let Some(content) = input
+                    .scene
+                    .relation_from::<Presents>(layer)?
+                    .map(|relation| relation.value().target)
+                else {
+                    continue;
+                };
+                let existing_region = input
+                    .scene
+                    .relation_from::<RecognizedFrom>(content)?
+                    .map(|relation| relation.value().target);
+                let geometry = input
+                    .scene
+                    .component::<Geometry>(layer)?
+                    .ok_or_else(|| anyhow!("custom text layer {layer} has no geometry"))?;
+                let crop = crop(&source, &geometry).with_context(|| {
+                    format!("custom text layer {layer} is outside its source image")
+                })?;
+                let previous = input.scene.component::<SourceText>(content)?;
+                if previous.as_ref().is_some_and(|value| {
+                    matches!(value.text.origin, Origin::User) && !value.text.value.is_empty()
+                }) {
+                    continue;
+                }
+                targets.push(OcrTarget {
+                    content,
+                    region: existing_region,
+                    geometry,
+                    previous,
+                    image: crop,
                 });
             }
         }
@@ -171,26 +214,47 @@ impl Model {
         let mut edit = input.scene.edit_as(generation.clone());
         edit.observe_assets(page)?;
         for result in &results {
-            edit.observe::<Region>(result.region)?;
-            edit.observe::<Geometry>(result.region)?;
+            if let Some(region) = result.region {
+                edit.observe::<Region>(region)?;
+                edit.observe::<Geometry>(region)?;
+            }
             edit.observe::<SourceText>(result.content)?;
         }
         for result in results {
+            let region = match result.region {
+                Some(region) => region,
+                None => {
+                    let region = edit.add_entity(page, At::End)?;
+                    edit.set(region, &result.geometry)?;
+                    edit.set(
+                        region,
+                        &Region {
+                            origin: Origin::Generated(generation.clone()),
+                            kind: TextRegion::kind(),
+                            label: Some("custom-text-frame".to_owned()),
+                        },
+                    )?;
+                    edit.relate::<RecognizedFrom>(result.content, region)?;
+                    region
+                }
+            };
             let language = result
                 .previous
                 .and_then(|value| value.language)
                 .or_else(|| LanguageTag::new("ja-JP").ok());
-            edit.set(
-                result.content,
-                &SourceText {
-                    text: Authored::generated(result.text, generation.clone()),
-                    language,
-                },
-            )?;
+            let source = SourceText {
+                text: Authored::generated(result.text, generation.clone()),
+                language,
+            };
+            if input.has_entity_scope() {
+                edit.set_generated_source_text_if_empty(result.content, &source)?;
+            } else {
+                edit.set(result.content, &source)?;
+            }
             let (min_x, min_y, max_x, max_y) = geometry_extents(&result.geometry)
-                .ok_or_else(|| anyhow!("text region {} has empty geometry", result.region))?;
+                .ok_or_else(|| anyhow!("text region {region} has empty geometry"))?;
             edit.set(
-                result.region,
+                region,
                 &OcrAnalysis {
                     origin: Origin::Generated(generation.clone()),
                     direction: if max_y - min_y >= (max_x - min_x) * 1.15 {
@@ -209,7 +273,7 @@ impl Model {
 
 struct OcrTarget {
     content: EntityId,
-    region: EntityId,
+    region: Option<EntityId>,
     geometry: Geometry,
     previous: Option<SourceText>,
     image: DynamicImage,
@@ -217,7 +281,7 @@ struct OcrTarget {
 
 struct OcrResult {
     content: EntityId,
-    region: EntityId,
+    region: Option<EntityId>,
     geometry: Geometry,
     previous: Option<SourceText>,
     text: String,

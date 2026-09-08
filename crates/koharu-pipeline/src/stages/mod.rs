@@ -56,6 +56,10 @@ impl StageInput {
             entity,
         )
     }
+
+    fn has_entity_scope(&self) -> bool {
+        self.entities.is_some()
+    }
 }
 
 #[async_trait]

@@ -460,6 +460,77 @@ async fn producer_reruns_respect_component_ownership() {
 }
 
 #[tokio::test]
+async fn explicit_ocr_claims_empty_manual_source_only() {
+    let mut session = Session::memory().await.unwrap();
+    let mut content = None;
+    let patch = session
+        .snapshot()
+        .patch(|edit| {
+            let page = edit.add_page(page(), At::End)?;
+            let entity = edit.add_text_content(page, At::End)?;
+            edit.set(entity, &source(""))?;
+            content = Some(entity);
+            Ok(())
+        })
+        .unwrap();
+    let snapshot = session.commit(patch).await.unwrap().snapshot;
+    let content = content.unwrap();
+    let generation = Generation::new(ProducerId::new("dev.koharu.pipeline.ocr").unwrap());
+    let recognized = SourceText {
+        text: Authored::generated("recognized".to_owned(), generation.clone()),
+        language: Some(LanguageTag::new("ja").unwrap()),
+    };
+
+    let mut edit = snapshot.edit_as(generation.clone());
+    edit.set_generated_source_text_if_empty(content, &recognized)
+        .unwrap();
+    let snapshot = session
+        .commit(edit.finish().unwrap())
+        .await
+        .unwrap()
+        .snapshot;
+    assert_eq!(
+        snapshot
+            .component::<SourceText>(content)
+            .unwrap()
+            .unwrap()
+            .text
+            .value,
+        "recognized"
+    );
+
+    let mut clear = snapshot.edit();
+    clear.set(content, &source("")).unwrap();
+    let snapshot = session
+        .commit(clear.finish().unwrap())
+        .await
+        .unwrap()
+        .snapshot;
+    let mut rerun = snapshot.edit_as(generation.clone());
+    rerun
+        .set_generated_source_text_if_empty(content, &recognized)
+        .unwrap();
+    let snapshot = session
+        .commit(rerun.finish().unwrap())
+        .await
+        .unwrap()
+        .snapshot;
+
+    let mut edit = snapshot.edit();
+    edit.set(content, &source("user edit")).unwrap();
+    let snapshot = session
+        .commit(edit.finish().unwrap())
+        .await
+        .unwrap()
+        .snapshot;
+    let mut rerun = snapshot.edit_as(generation);
+    assert!(matches!(
+        rerun.set_generated_source_text_if_empty(content, &recognized),
+        Err(Error::Authorship(_))
+    ));
+}
+
+#[tokio::test]
 async fn pipeline_removal_respects_entity_lifecycle_owner() {
     let mut session = Session::memory().await.unwrap();
     let mut page_id = None;
